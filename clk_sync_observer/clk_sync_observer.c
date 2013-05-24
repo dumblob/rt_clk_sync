@@ -100,6 +100,13 @@ typedef struct {
   uint16_t checksum;
 } udp_hdr_t;
 
+typedef struct {
+  uint8_t li_vn_mode;  /* 2b LI, 3b VN, 3b Mode */
+  uint8_t stratum;
+  uint8_t poll;
+  uint8_t precision;
+} ntp_t;
+
 struct global_vars_s {
   pcap_t *pcap_handle;
 } global_vars;
@@ -113,25 +120,37 @@ struct args_s {
 void process_payload(struct args_s *args, const uint8_t *data,
     const uint32_t len) {
   data = data;
-  fprintf(args->o, "_______%d\n", len);//FIXME
+  fprintf(args->o, "  _______%d\n", len);//FIXME
   fflush(args->o);
+}
+
+/**
+ * convert network IPv6 representation to host one; works in situ
+ */
+void *ntohv6(uint32_t *addr) {
+  addr[0] = ntohl(*(addr + 0));
+  addr[1] = ntohl(*(addr + 1));
+  addr[2] = ntohl(*(addr + 2));
+  addr[3] = ntohl(*(addr + 3));
+
+  return addr;
 }
 
 void print_flow_def(FILE *f, const void *addr, uint16_t port,
     const bool is_ipv6) {
   char buf[INET6_ADDRSTRLEN +1] = {0};
-  uint16_t ip4;
-  uint32_t ip6;
+  void *ip6 = NULL;
+  uint32_t ip4;
 
   if (is_ipv6)
-    ip6 = ntohl(*((uint32_t *)addr));
+    ip6 = ntohv6((uint32_t *)addr);
   else
-    ip4 = ntohs(*((uint16_t *)addr));
+    ip4 = ntohl(*((uint32_t *)addr));
 
-  fprintf(f, "%s:%d",
+  fprintf(f, "%s[%d]",
       inet_ntop(
         (is_ipv6) ? AF_INET6 : AF_INET,
-        (is_ipv6) ? (void *)&ip6 : (void *)&ip4,
+        (is_ipv6) ? ip6 : (void *)&ip4,
         buf,
         INET6_ADDRSTRLEN),
       ntohs(port));
