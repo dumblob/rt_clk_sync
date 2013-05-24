@@ -29,9 +29,11 @@
 #include <fcntl.h>  // open()
 #include <errno.h>
 #include <netinet/in.h>  // in_addr in6_addr
+#include <arpa/inet.h>  // inet_ntop()
 #include <signal.h>  // sigaction()
 #include <getopt.h>
 #include <string.h>  // strerror()
+#include <stdbool.h>
 
 #define RING_BUF_SIZE 8192  /* for 1 packet */
 #define READ_TIMEOUT 300  /* ms */
@@ -107,6 +109,7 @@ struct args_s {
   FILE *o;  // output
 } args;
 
+/* extract NTP timestamps */
 void process_payload(struct args_s *args, const uint8_t *data,
     const uint32_t len) {
   data = data;
@@ -114,18 +117,45 @@ void process_payload(struct args_s *args, const uint8_t *data,
   fflush(args->o);
 }
 
+void print_flow_def(FILE *f, const void *addr, uint16_t port,
+    const bool is_ipv6) {
+  char buf[INET6_ADDRSTRLEN +1] = {0};
+  uint16_t ip4;
+  uint32_t ip6;
+
+  if (is_ipv6)
+    ip6 = ntohl(*((uint32_t *)addr));
+  else
+    ip4 = ntohs(*((uint16_t *)addr));
+
+  fprintf(f, "%s:%d",
+      inet_ntop(
+        (is_ipv6) ? AF_INET6 : AF_INET,
+        (is_ipv6) ? (void *)&ip6 : (void *)&ip4,
+        buf,
+        INET6_ADDRSTRLEN),
+      ntohs(port));
+}
+
 #define CHECK_PACKET_LEN \
   do { if (packet > _packet + header->caplen) return; } while (0)
 
 /** remove packet headers (assume only IP) */
-void handle_packet(uint8_t *args, const struct pcap_pkthdr *header,
+void handle_packet(uint8_t *_args, const struct pcap_pkthdr *header,
     const uint8_t *_packet) {
+  struct args_s *args = (struct args_s *)_args;
   uint8_t *packet = (uint8_t *)_packet;
-  /* jump over the ethernet header */
+  uint8_t *tmp;
+
+  /* jump over ethernet header */
   packet += sizeof(eth_hdr_t);
   CHECK_PACKET_LEN;
 
-  /* jump over the IP header(s) */
+  void *src = NULL;  /* in_addr or in6_addr */
+  void *dst = NULL;  /* in_addr or in6_addr */
+  bool ipv6_found = false;
+
+  /* jump over IP header(s) */
   switch (IPv4_version(((ipv4_hdr_t *)packet)->ver_hdrlen)) {
     case IP_VERSION_4:
       /* do not support fragmented packets (but if fragmented, take the
@@ -137,8 +167,11 @@ void handle_packet(uint8_t *args, const struct pcap_pkthdr *header,
       /* NTP works only using UDP */
       if (((ipv4_hdr_t *)packet)->proto != IPPROTO_UDP) return;
 
+      tmp = packet;
       packet += IPv4_hdrlen(((ipv4_hdr_t *)packet)->ver_hdrlen);
       CHECK_PACKET_LEN;
+      src = (void *)&((ipv4_hdr_t *)tmp)->src;
+      dst = (void *)&((ipv4_hdr_t *)tmp)->dst;
       break;
     case IP_VERSION_6:
       /* jump over all chained IPv6 headers */
@@ -149,16 +182,26 @@ void handle_packet(uint8_t *args, const struct pcap_pkthdr *header,
 
       if (((ipv6_hdr_t *)packet)->nexthdr != IPPROTO_UDP) return;
 
+      tmp = packet;
       packet += sizeof(ipv6_hdr_t);
       CHECK_PACKET_LEN;
+      src = (void *)&((ipv6_hdr_t *)tmp)->src;
+      dst = (void *)&((ipv6_hdr_t *)tmp)->dst;
+      ipv6_found = true;
       break;
     default:
       return;
   }
 
-  packet += sizeof(udp_hdr_t);  /* jump over the UDP header */
+  tmp = packet;
+  packet += sizeof(udp_hdr_t);  /* jump over UDP header */
   CHECK_PACKET_LEN;
-  process_payload((struct args_s *)args, packet, header->caplen - (packet - _packet));
+  fputs("src ", args->o);
+  print_flow_def(args->o, src, ((udp_hdr_t *)tmp)->src, ipv6_found);
+  fputs(" dst ", args->o);
+  print_flow_def(args->o, dst, ((udp_hdr_t *)tmp)->dst, ipv6_found);
+  fputs("\n", args->o);
+  process_payload(args, packet, header->caplen - (packet - _packet));
 }
 
 int start_capture(struct args_s *args) {
