@@ -17,6 +17,7 @@
 //   NTP control digests checking
 //   NTP message authentication code support
 //   NTP port choice
+//   NTP leap detection
 
 #include <stdint.h>  // HACK for pcap missing u_* types (needed under Linux)
 #define __USE_BSD    // ...see the preceeding line
@@ -101,11 +102,29 @@ typedef struct {
 } udp_hdr_t;
 
 typedef struct {
-  uint8_t li_vn_mode;  /* 2b LI, 3b VN, 3b Mode */
+  uint8_t li_vn_mode;   /* 2b Leap Indicator, 3b Version Number, 3b Association Mode */
   uint8_t stratum;
-  uint8_t poll;
-  uint8_t precision;
-} ntp_t;
+  uint8_t poll;         /* msg interval in log2 sec */
+  uint8_t precision;    /* precision of the system clock in log2 sec */
+  uint32_t root_delay;  /* total round-trip delay to the ref clock */
+  uint32_t root_disp;   /* root dispersion (total disp. to the ref clk) */
+  uint32_t ref_id;      /* reference ID (usually ASCII printable) */
+  uint64_t ref_tstamp;  /* reference timestamp (time when sys clk was last set/corrected) */
+  uint64_t org_tstamp;  /* origin timestamp */
+  uint64_t rec_tstamp;  /* receive timestamp */
+  uint64_t xmt_tstamp;  /* transmit timestamp */
+} ntp_hdr_t;
+
+  uint64_t dst_tstamp;  /* destination timestamp; not part of header */
+
+typedef 
+  void *field1;          /* extension field1 (variable length) */
+  void *field2;          /* extension field2 (variable length) */
+
+typedef struct {
+  uint32_t key_id;
+  uint8_t dgst[128];
+} ntp_ftr_t;
 
 struct global_vars_s {
   pcap_t *pcap_handle;
@@ -114,6 +133,9 @@ struct global_vars_s {
 struct args_s {
   char *d;  // eth device
   FILE *o;  // output
+  char buf[1024] = {0};
+  int buf_end = 0;
+  struct timeval sysclk;
 } args;
 
 /* extract NTP timestamps */
@@ -122,12 +144,42 @@ void process_payload(struct args_s *args, const uint8_t *data,
   data = data;
   fprintf(args->o, "  _______%d\n", len);//FIXME
   fflush(args->o);
+
+  if (stratum == 0) return;
+
+  switch (association_mode) {
+    // no association
+    case 0:
+      if (newps)  //FIXME association modes
+      else if (fxmit)
+      else if (many)
+      else if (newbc)
+      else
+        return;
+    // symm. active
+    case 1:
+      t
+    // symm. passive
+    case 2:
+    // client
+    case 3:
+    // server
+    case 4:
+    // broadcast
+    case 5:
+    // bcast client
+    case 6:
+    // undefined/unknown/invalid_packet
+    default:
+      return;
+  }
 }
 
 /**
  * convert network IPv6 representation to host one; works in situ
  */
 void *ntohv6(uint32_t *addr) {
+  //FIXME handle endianess for 62b values
   addr[0] = ntohl(*(addr + 0));
   addr[1] = ntohl(*(addr + 1));
   addr[2] = ntohl(*(addr + 2));
@@ -215,12 +267,19 @@ void handle_packet(uint8_t *_args, const struct pcap_pkthdr *header,
   tmp = packet;
   packet += sizeof(udp_hdr_t);  /* jump over UDP header */
   CHECK_PACKET_LEN;
-  fputs("src ", args->o);
-  print_flow_def(args->o, src, ((udp_hdr_t *)tmp)->src, ipv6_found);
-  fputs(" dst ", args->o);
-  print_flow_def(args->o, dst, ((udp_hdr_t *)tmp)->dst, ipv6_found);
-  fputs("\n", args->o);
+
+  //FIXME add timestamps from header (written by pcap)
+  /* construct nice message */
+  args->buf_end += sprintf(args->buf + args->buf_end, "src ");
+  args->buf_end += print_flow_def(args->buf + args->buf_end, src,
+      ((udp_hdr_t *)tmp)->src, ipv6_found);
+  args->buf_end += sprintf(args->buf, " dst ");
+  args->buf_end += print_flow_def(args->buf + args->buf_end, dst,
+      ((udp_hdr_t *)tmp)->dst, ipv6_found);
+  args->buf_end += sprintf(args->buf + args->buf_end, "\n");
+
   process_payload(args, packet, header->caplen - (packet - _packet));
+  args->buf_end = 0;
 }
 
 int start_capture(struct args_s *args) {

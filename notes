@@ -1,0 +1,47 @@
+pcap
+  pcap-linux.c
+    if (handle->opt.tstamp_type == PCAP_TSTAMP_ADAPTER) {
+      /*
+        * Hardware timestamp, synchronized
+        * with the system clock.
+        */
+      timesource = SOF_TIMESTAMPING_SYS_HARDWARE;
+    } else {
+      /*
+        * PCAP_TSTAMP_ADAPTER_UNSYNCED - hardware
+        * timestamp, not synchronized with the
+        * system clock.
+        */
+      timesource = SOF_TIMESTAMPING_RAW_HARDWARE;
+    }
+    if (setsockopt(handle->fd, SOL_PACKET, PACKET_TIMESTAMP,
+      (void *)&timesource, sizeof(timesource))) {
+      snprintf(handle->errbuf, PCAP_ERRBUF_SIZE, 
+        "can't set PACKET_TIMESTAMP: %s", 
+        pcap_strerror(errno));
+    }
+  linux-kernel/net/socket.c
+    __sock_recv_timestamp()
+  linux-kernel/include/linux/skbuff.h
+    struct skb_shared_info {
+      ...
+      struct skb_shared_hwtstamps hwtstamps;
+      ...
+    }
+  linux-kernel/net/core/skbuff.c
+    skb_tstamp_tx()  /* here is the decision between using HW or SW tstamps */
+  linux-kernel/drivers/net/ethernet/intel/e1000e/netdev.c
+    e1000e_systim_to_hwtstamp()
+  win
+    GET_TIME(result, BASE_TIME) /* save current timestamp to result (use
+                                   BASE_TIME as the time start)
+              the driver decides between the following possibilities:
+                if winNT
+                  32b system: RDTSC
+                  64b system:
+                      PTime = KeQueryPerformanceCounter(&TimeFreq);
+                    or
+                      KeQuerySystemTime(&SystemTime);
+                else
+                  return BASE_TIME
+                                */
