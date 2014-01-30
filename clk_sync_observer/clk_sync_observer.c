@@ -295,6 +295,8 @@ int start_capture(struct args_s *args) {
 
   struct bpf_program filter;
 
+  //FIXME set HW timestamping on!
+
   /* IPv4, IPv6, UDP, port 123
      http://ethereal.cs.pu.edu.tw/lists/ethereal-users/200208/msg00039.html */
   if (pcap_compile(global_vars.pcap_handle, &filter,
