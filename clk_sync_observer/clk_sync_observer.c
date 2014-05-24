@@ -11,6 +11,7 @@
 
 // useful links
 //   fxr.watson.org
+//   http://dpdk.org/ (extremely fast packet processing on x86)
 // not implemented
 //   support for any L3+ tunneling (including IPSec etc.)
 //   support for fragmented packets (neither IPv4 nor IPv6)
