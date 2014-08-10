@@ -47,6 +47,7 @@ The ultimate goal (megalomanic):
   standards to ordinary PC's crystals);
   apply clock ensembling algorithms to perform this large-scale
   time fusion
+* revise/redesign application interface to allow e.g. delay/latency measurement between two hosts (us and some other) on demand
 
 To Do
 -----
