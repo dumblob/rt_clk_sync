@@ -39,6 +39,10 @@ In longer term:
 * adaptive estimation of both clock and network parameters
   (autotuning, or continuous adaptation)
 
+* revise/redesign application interface to allow e.g. delay/latency measurement between two hosts (us and some other) on demand
+
+* statistics/logging of estimated accuracy (for audits, revisions, etc.)
+
 The ultimate goal (megalomanic):
 
 * release the Internet-wide network of computers and their clocks,
@@ -47,7 +51,6 @@ The ultimate goal (megalomanic):
   standards to ordinary PC's crystals);
   apply clock ensembling algorithms to perform this large-scale
   time fusion
-* revise/redesign application interface to allow e.g. delay/latency measurement between two hosts (us and some other) on demand
 
 To Do
 -----
