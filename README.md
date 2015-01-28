@@ -39,7 +39,9 @@ In longer term:
 * adaptive estimation of both clock and network parameters
   (autotuning, or continuous adaptation)
 
-* revise/redesign application interface to allow e.g. delay/latency measurement between two hosts (us and some other) on demand
+* revise/redesign application interface to allow e.g. delay/latency measurement between two hosts (us and some other) on demand or
+  reliable reporting of current/min/max accuracy (delay/latency) which
+  all other connected stations have
 
 * statistics/logging of estimated accuracy (for audits, revisions, etc.)
 
