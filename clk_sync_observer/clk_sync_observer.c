@@ -20,8 +20,9 @@
 //   NTP port choice
 //   NTP leap detection
 
-#include <stdint.h>  // HACK for pcap missing u_* types (needed under Linux)
-#define __USE_BSD    // ...see the preceeding line
+//#include <stdint.h>  // HACK for pcap missing u_* types (needed under Linux)
+//#define __USE_BSD    // ...see the preceeding line
+#include <inttypes.h>
 #include <pcap/pcap.h>
 
 #include <stdint.h>  // u_* types
@@ -36,6 +37,8 @@
 #include <getopt.h>
 #include <string.h>  // strerror()
 #include <stdbool.h>
+
+#define length(a) (sizeof(a)/sizeof((a)[0]))
 
 #define RING_BUF_SIZE 8192  /* for 1 packet */
 #define READ_TIMEOUT 300  /* ms */
@@ -60,18 +63,18 @@ typedef struct {
    http://systhread.net/texts/200805lpcap1.php) */
 typedef struct {
   uint8_t        ver_hdrlen;      /* 4b version; 4b header length (in multiples of 4B) */
-    #define IPv4_version(x) ((x) >> 4)  /* should be IPPROTO_IP */
-    #define IPv4_hdrlen(x) (((x) & 0x0f) * 4)
+#define IPv4_version(x) ((x) >> 4)  /* should be IPPROTO_IP */
+#define IPv4_hdrlen(x) (((x) & 0x0f) * 4)
   uint8_t        dscp;            /* differentiated services code point */
   uint16_t       totallen;        /* len of fragment (header + data) in bytes */
   uint16_t       id;              /* identification */
   uint16_t       flags_foff;      /* flags & fragment offset field */
-    #define IPv4_DF       0x4000  /* dont fragment flag */
-    #define IPv4_FOF_MASK 0x1fff  /* mask for fragmenting bits */
+#define IPv4_DF       0x4000  /* dont fragment flag */
+#define IPv4_FOF_MASK 0x1fff  /* mask for fragmenting bits */
   uint8_t        ttl;
   uint8_t        proto;           /* protocol
                                      IPPROTO_IP (could be more than once,
-                                       but we do not support IP in IP)
+				     but we do not support IP in IP)
                                      IPPROTO_TCP
                                      IPPROTO_UDP */
   uint16_t       checksum;
@@ -82,13 +85,13 @@ typedef struct {
 /* IPv6 header (according to RFC 2460) */
 typedef struct {
   uint32_t ver_class_label;  /* 4b version; 8b traffic class; 20b flow label */
-    #define IPv6_version(x) ((x) >> (8 + 20))  /* should be IPPROTO_IPV6 */
+#define IPv6_version(x) ((x) >> (8 + 20))  /* should be IPPROTO_IPV6 */
   uint16_t payloadlen;  /* len of the data after current header in bytes */
   uint8_t nexthdr;  /* same as IPv4 protocol field
                        netinet/in.h:
-                         IPPROTO_NONE no next header
-                         IPPROTO_IPV6 ipv6 header (can be more than once)
-                         IPPROTO_FRAGMENT */
+		       IPPROTO_NONE no next header
+		       IPPROTO_IPV6 ipv6 header (can be more than once)
+		       IPPROTO_FRAGMENT */
   uint8_t hoplimit;
   struct in6_addr src;
   struct in6_addr dst;
@@ -116,11 +119,11 @@ typedef struct {
   uint64_t xmt_tstamp;  /* transmit timestamp */
 } ntp_hdr_t;
 
-  uint64_t dst_tstamp;  /* destination timestamp; not part of header */
+uint64_t dst_tstamp;  /* destination timestamp; not part of header */
 
 typedef 
-  void *field1;          /* extension field1 (variable length) */
-  void *field2;          /* extension field2 (variable length) */
+void *field1;          /* extension field1 (variable length) */
+void *field2;          /* extension field2 (variable length) */
 
 typedef struct {
   uint32_t key_id;
@@ -134,14 +137,21 @@ struct global_vars_s {
 struct args_s {
   char *d;  // eth device
   FILE *o;  // output
-  char buf[1024] = {0};
-  int buf_end = 0;
+  char *tstamp_type; // prefered timestamp type
+  int promisc;
+  char buf[1024];// = {0};
+  int buf_end;// = 0;
   struct timeval sysclk;
-} args;
+} args = {
+  .tstamp_type = NULL,
+  .promisc = 0,
+  .buf_end = 0,
+};
 
 /* extract NTP timestamps */
+#if 0
 void process_payload(struct args_s *args, const uint8_t *data,
-    const uint32_t len) {
+		     const uint32_t len) {
   data = data;
   fprintf(args->o, "  _______%d\n", len);//FIXME
   fflush(args->o);
@@ -150,31 +160,32 @@ void process_payload(struct args_s *args, const uint8_t *data,
 
   switch (association_mode) {
     // no association
-    case 0:
-      if (newps)  //FIXME association modes
-      else if (fxmit)
-      else if (many)
-      else if (newbc)
-      else
-        return;
-    // symm. active
-    case 1:
-      t
-    // symm. passive
-    case 2:
-    // client
-    case 3:
-    // server
-    case 4:
-    // broadcast
-    case 5:
-    // bcast client
-    case 6:
-    // undefined/unknown/invalid_packet
-    default:
+  case 0:
+    if (newps)  //FIXME association modes
+    else if (fxmit)
+    else if (many)
+    else if (newbc)
+    else
       return;
+    // symm. active
+  case 1:
+    t
+      // symm. passive
+  case 2:
+    // client
+  case 3:
+    // server
+  case 4:
+    // broadcast
+  case 5:
+    // bcast client
+  case 6:
+    // undefined/unknown/invalid_packet
+  default:
+    return;
   }
 }
+#endif
 
 /**
  * convert network IPv6 representation to host one; works in situ
@@ -190,7 +201,7 @@ void *ntohv6(uint32_t *addr) {
 }
 
 void print_flow_def(FILE *f, const void *addr, uint16_t port,
-    const bool is_ipv6) {
+		    const bool is_ipv6) {
   char buf[INET6_ADDRSTRLEN +1] = {0};
   void *ip6 = NULL;
   uint32_t ip4;
@@ -201,23 +212,26 @@ void print_flow_def(FILE *f, const void *addr, uint16_t port,
     ip4 = ntohl(*((uint32_t *)addr));
 
   fprintf(f, "%s[%d]",
-      inet_ntop(
-        (is_ipv6) ? AF_INET6 : AF_INET,
-        (is_ipv6) ? ip6 : (void *)&ip4,
-        buf,
-        INET6_ADDRSTRLEN),
-      ntohs(port));
+	  inet_ntop(
+		    (is_ipv6) ? AF_INET6 : AF_INET,
+		    (is_ipv6) ? ip6 : (void *)&ip4,
+		    buf,
+		    INET6_ADDRSTRLEN),
+	  ntohs(port));
 }
 
-#define CHECK_PACKET_LEN \
+#define CHECK_PACKET_LEN						\
   do { if (packet > _packet + header->caplen) return; } while (0)
 
 /** remove packet headers (assume only IP) */
 void handle_packet(uint8_t *_args, const struct pcap_pkthdr *header,
-    const uint8_t *_packet) {
+		   const uint8_t *_packet) {
   struct args_s *args = (struct args_s *)_args;
   uint8_t *packet = (uint8_t *)_packet;
   uint8_t *tmp;
+
+  /* pcap timestamp */
+  fprintf(stderr, "%u.%09u\n", header->ts.tv_sec, header->ts.tv_usec);
 
   /* jump over ethernet header */
   packet += sizeof(eth_hdr_t);
@@ -229,40 +243,40 @@ void handle_packet(uint8_t *_args, const struct pcap_pkthdr *header,
 
   /* jump over IP header(s) */
   switch (IPv4_version(((ipv4_hdr_t *)packet)->ver_hdrlen)) {
-    case IP_VERSION_4:
-      /* do not support fragmented packets (but if fragmented, take the
-         first fragment and assume, the message is not damaged) */
-      if (! (IPv4_DF || (! (IPv4_FOF_MASK &
-                ntohs(((ipv4_hdr_t *)packet)->flags_foff)) )) )
-        return;
+  case IP_VERSION_4:
+    /* do not support fragmented packets (but if fragmented, take the
+       first fragment and assume, the message is not damaged) */
+    if (! (IPv4_DF || (! (IPv4_FOF_MASK &
+			  ntohs(((ipv4_hdr_t *)packet)->flags_foff)) )) )
+      return;
 
-      /* NTP works only using UDP */
-      if (((ipv4_hdr_t *)packet)->proto != IPPROTO_UDP) return;
+    /* NTP works only using UDP */
+    if (((ipv4_hdr_t *)packet)->proto != IPPROTO_UDP) return;
 
-      tmp = packet;
-      packet += IPv4_hdrlen(((ipv4_hdr_t *)packet)->ver_hdrlen);
-      CHECK_PACKET_LEN;
-      src = (void *)&((ipv4_hdr_t *)tmp)->src;
-      dst = (void *)&((ipv4_hdr_t *)tmp)->dst;
-      break;
-    case IP_VERSION_6:
-      /* jump over all chained IPv6 headers */
-      while (((ipv6_hdr_t *)packet)->nexthdr == IPPROTO_IPV6) {
-        packet += sizeof(ipv6_hdr_t);
-        CHECK_PACKET_LEN;
-      }
-
-      if (((ipv6_hdr_t *)packet)->nexthdr != IPPROTO_UDP) return;
-
-      tmp = packet;
+    tmp = packet;
+    packet += IPv4_hdrlen(((ipv4_hdr_t *)packet)->ver_hdrlen);
+    CHECK_PACKET_LEN;
+    src = (void *)&((ipv4_hdr_t *)tmp)->src;
+    dst = (void *)&((ipv4_hdr_t *)tmp)->dst;
+    break;
+  case IP_VERSION_6:
+    /* jump over all chained IPv6 headers */
+    while (((ipv6_hdr_t *)packet)->nexthdr == IPPROTO_IPV6) {
       packet += sizeof(ipv6_hdr_t);
       CHECK_PACKET_LEN;
-      src = (void *)&((ipv6_hdr_t *)tmp)->src;
-      dst = (void *)&((ipv6_hdr_t *)tmp)->dst;
-      ipv6_found = true;
-      break;
-    default:
-      return;
+    }
+
+    if (((ipv6_hdr_t *)packet)->nexthdr != IPPROTO_UDP) return;
+
+    tmp = packet;
+    packet += sizeof(ipv6_hdr_t);
+    CHECK_PACKET_LEN;
+    src = (void *)&((ipv6_hdr_t *)tmp)->src;
+    dst = (void *)&((ipv6_hdr_t *)tmp)->dst;
+    ipv6_found = true;
+    break;
+  default:
+    return;
   }
 
   tmp = packet;
@@ -272,59 +286,133 @@ void handle_packet(uint8_t *_args, const struct pcap_pkthdr *header,
   //FIXME add timestamps from header (written by pcap)
   /* construct nice message */
   args->buf_end += sprintf(args->buf + args->buf_end, "src ");
-  args->buf_end += print_flow_def(args->buf + args->buf_end, src,
-      ((udp_hdr_t *)tmp)->src, ipv6_found);
+  //args->buf_end += print_flow_def(stdout, args->buf + args->buf_end, src,
+  //((udp_hdr_t *)tmp)->src, ipv6_found);
   args->buf_end += sprintf(args->buf, " dst ");
-  args->buf_end += print_flow_def(args->buf + args->buf_end, dst,
-      ((udp_hdr_t *)tmp)->dst, ipv6_found);
+  //args->buf_end += print_flow_def(stdout, args->buf + args->buf_end, dst,
+  //((udp_hdr_t *)tmp)->dst, ipv6_found);
   args->buf_end += sprintf(args->buf + args->buf_end, "\n");
 
-  process_payload(args, packet, header->caplen - (packet - _packet));
+  //process_payload(args, packet, header->caplen - (packet - _packet));
   args->buf_end = 0;
+}
+
+void print_pcap_warning(FILE *f, int rc) {
+  switch (rc) {
+  case PCAP_WARNING_PROMISC_NOTSUP:
+    fprintf(f, "WARNING: promiscuous mode not supported\n");
+    break;
+  case PCAP_WARNING_TSTAMP_TYPE_NOTSUP:
+    fprintf(f, "WARNING: timestamp type not supported\n");
+    break;
+  case PCAP_WARNING:
+    fprintf(f, "WARNING: generic(?) pcap_activate() warning\n");
+    break;
+  default:
+    fprintf(f, "WARNING: unknown pcap_activate() warning\n");
+    break;
+  }
 }
 
 int start_capture(struct args_s *args) {
   char errbuf[PCAP_ERRBUF_SIZE];
+  int rc = 0;
   errbuf[0] = '\0';
 
-  /* 1 ~ promisc */
-  if ((global_vars.pcap_handle = pcap_open_live(args->d, RING_BUF_SIZE, 1,
-          READ_TIMEOUT, errbuf)) == NULL) {
-    fprintf(stderr, "ERR: %s\n", errbuf);
-    return EXIT_FAILURE;
+  /* set up capture device and parameters */
+  pcap_t *pcap;
+  global_vars.pcap_handle = pcap = pcap_create(args->d, errbuf);
+  if (pcap == NULL)
+    goto pcap_fatal;
+  if (pcap_set_snaplen(pcap, RING_BUF_SIZE))
+    goto pcap_fatal;
+  fprintf(stderr, "setting %spromiscuous mode @%s\n",
+	  args->promisc ? "" : "not-", args->d);
+  if (pcap_set_promisc(pcap, args->promisc))
+    goto pcap_fatal;
+  if (pcap_set_timeout(pcap, READ_TIMEOUT))
+    goto pcap_fatal;  
+
+  /* set timestamp type and resolution */
+  const char *tstamp_type_pref[] = {
+    "adapter_unsynced", "adapter", "host",
+  };
+  int *tstamp_types;
+  rc = pcap_list_tstamp_types(pcap, &tstamp_types);
+  if (rc == PCAP_ERROR) {
+    fprintf(stderr, "ERR: %s \"%s\"\n", pcap_geterr(pcap), args->d);
   }
+  else {
+    int i, j, pref_idx = length(tstamp_type_pref), pref_type = PCAP_ERROR;
+    fprintf(stderr, "%s supported pcap timestamp types: ", args->d);
+    for (i = 0; i < rc; i++) {
+      const char *name = pcap_tstamp_type_val_to_name(tstamp_types[i]);
+      fprintf(stderr, "%s (%s)%s", name,
+	      pcap_tstamp_type_val_to_description(tstamp_types[i]),
+	      (i == rc-1) ? "\n" : ", ");
+      for (j = 0; j < pref_idx; j++) {
+	if (args->tstamp_type) {
+	  /* prefer user's choice */
+	  if (strcmp(name, args->tstamp_type) == 0) {
+	    pref_idx = -1;
+	    pref_type = tstamp_types[i];
+	  }
+	}
+	if (strcmp(name, tstamp_type_pref[j]) == 0) {
+	  pref_idx = j;
+	  pref_type = tstamp_types[i];
+	}
+      }
+    }
+    if (pref_idx != length(tstamp_type_pref)) {
+      fprintf(stderr, "setting timestamp type to \"%s\"\n",
+	      pcap_tstamp_type_val_to_name(pref_type));
+      if (pcap_set_tstamp_type(pcap, pref_type)) {
+	fprintf(stderr, "ERR: %s \"%s\"\n", pcap_geterr(pcap), args->d);
+      }
+    }
+    else {
+      fprintf(stderr, "no prefered timestamp type found\n"); 
+    }
+    pcap_free_tstamp_types(tstamp_types);
+  }
+  if (pcap_set_tstamp_precision(pcap, PCAP_TSTAMP_PRECISION_NANO))
+    goto pcap_fatal;
 
-  struct bpf_program filter;
-
-  //FIXME set HW timestamping on!
+  /* activate capture device */
+  if ((rc = pcap_activate(pcap)) < 0)
+    goto pcap_fatal;
+  if (rc)
+    print_pcap_warning(stderr, rc);
 
   /* IPv4, IPv6, UDP, port 123
      http://ethereal.cs.pu.edu.tw/lists/ethereal-users/200208/msg00039.html */
-  if (pcap_compile(global_vars.pcap_handle, &filter,
-        "udp && (port 123)", 1, PCAP_NETMASK_UNKNOWN)) {
+  struct bpf_program filter;
+  if (pcap_compile(pcap, &filter,
+		   "udp && (port 123)", 1, PCAP_NETMASK_UNKNOWN)) {
     fprintf(stderr, "ERR: %s \"%s\"\n",
-        pcap_geterr(global_vars.pcap_handle), args->d);
+	    pcap_geterr(pcap), args->d);
     return EXIT_FAILURE;
   }
 
   /* man pcap-filter */
-  if (pcap_setfilter(global_vars.pcap_handle, &filter)) {
+  if (pcap_setfilter(pcap, &filter)) {
     fprintf(stderr, "ERR: %s \"%s\"\n",
-        pcap_geterr(global_vars.pcap_handle), args->d);
+	    pcap_geterr(pcap), args->d);
     return EXIT_FAILURE;
   }
 
-  int ret = pcap_loop(global_vars.pcap_handle, -1, handle_packet, (void *)args);
-  pcap_close(global_vars.pcap_handle);
+  rc = pcap_loop(pcap, -1, handle_packet, (void *)args);
+  pcap_close(pcap);
 
-  if (ret == -1) {
-    fprintf(stderr, "ERR: %s \"%s\"\n",
-        pcap_geterr(global_vars.pcap_handle), args->d);
-    return EXIT_FAILURE;
-  }
-  else {
-    return EXIT_SUCCESS;
-  }
+  if (rc == -1)
+    goto pcap_fatal;
+  return EXIT_SUCCESS;
+  
+ pcap_fatal:
+  fprintf(stderr, "ERR: pcap @%s: %s\n",
+	  args->d, pcap_geterr(pcap));
+  return EXIT_FAILURE;
 }
 
 /* sigaction handler */
@@ -353,43 +441,48 @@ int main(int argc, char *argv[]) {
   args.o = NULL;
 
   int opt;
-  while ((opt = getopt(argc, argv, "+hd:o:")) != -1) {
+  while ((opt = getopt(argc, argv, "+hd:o:t:")) != -1) {
     switch (opt) {
-      case 'h':
-        printf("USAGE: %s [-h] [-d <eth_device>] [-o <output_file>]\n"
-            "  -d ethernet device to watch on\n"
-            "    if none given, watch on all available devices\n"
-            "  -o output file\n"
-            "    if none given, use stdout\n", argv[0]);
-        return EXIT_SUCCESS;
-      case 'd':
-        if (args.d == NULL)
-          args.d = argv[optind -1];
-        else
-          fprintf(stderr, "ERR: Argument -%c can be given only once!", (char)opt);
-        break;
-      case 'o':
-        if (args.o == NULL) {
-          int fildes;
-          if (
-              // obtain file descriptor
-              ((fildes = open(argv[optind -1], O_WRONLY | O_CREAT | O_EXCL,
-                              S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)) == -1)
-              ||
-              // use the obtained file descriptor
-              ((args.o = fdopen(fildes, "w")) == NULL)
-             ) {
-            fprintf(stderr, "ERR: Cannot open \"%s\" (%s).\n",
-                argv[optind -1], strerror(errno));
-            return EXIT_FAILURE;
-          }
-        }
-        else {
-          fprintf(stderr, "ERR: Argument -%c can be given only once!", (char)opt);
-        }
-        break;
-      default:
-        break;
+    case 'h':
+      printf("USAGE: %s [-h] [-d <eth_device>] [-o <output_file>]\n"
+	     "  -d ethernet device to watch on\n"
+	     "    if none given, watch on all available devices\n"
+	     "  -t timestamp_type\n"
+	     "    try to select chosen pcap timestamp type, if possible\n"
+	     "  -o output file\n"
+	     "    if none given, use stdout\n", argv[0]);
+      return EXIT_SUCCESS;
+    case 'd':
+      if (args.d == NULL)
+	args.d = argv[optind -1];
+      else
+	fprintf(stderr, "ERR: Argument -%c can be given only once!", (char)opt);
+      break;
+    case 't':
+      args.tstamp_type = argv[optind-1];
+      break;
+    case 'o':
+      if (args.o == NULL) {
+	int fildes;
+	if (
+	    // obtain file descriptor
+	    ((fildes = open(argv[optind -1], O_WRONLY | O_CREAT | O_EXCL,
+			    S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)) == -1)
+	    ||
+	    // use the obtained file descriptor
+	    ((args.o = fdopen(fildes, "w")) == NULL)
+	    ) {
+	  fprintf(stderr, "ERR: Cannot open \"%s\" (%s).\n",
+		  argv[optind -1], strerror(errno));
+	  return EXIT_FAILURE;
+	}
+      }
+      else {
+	fprintf(stderr, "ERR: Argument -%c can be given only once!", (char)opt);
+      }
+      break;
+    default:
+      break;
     }
   }
 
