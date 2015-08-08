@@ -39,6 +39,7 @@
 #include <stdbool.h>
 
 #define length(a) (sizeof(a)/sizeof((a)[0]))
+#define __packed __attribute__((packed))
 
 #define RING_BUF_SIZE 8192  /* for 1 packet */
 #define READ_TIMEOUT 300  /* ms */
@@ -56,7 +57,7 @@ typedef struct {
                                  >=1536 EtherType values
                                  rest is undefined */
   /* checksum is removed by libpcap */
-} eth_hdr_t;
+} __packed eth_hdr_t;
 
 /* IPv4 header (according to RFC 791), partially adopted from tutorial
    http://www.tcpdump.org/pcap.html and
@@ -80,7 +81,7 @@ typedef struct {
   uint16_t       checksum;
   struct in_addr src;
   struct in_addr dst;
-} ipv4_hdr_t;
+} __packed ipv4_hdr_t;
 
 /* IPv6 header (according to RFC 2460) */
 typedef struct {
@@ -95,7 +96,7 @@ typedef struct {
   uint8_t hoplimit;
   struct in6_addr src;
   struct in6_addr dst;
-} ipv6_hdr_t;
+} __packed ipv6_hdr_t;
 
 /* UDP header (according to RFC 768) */
 typedef struct {
@@ -103,7 +104,7 @@ typedef struct {
   uint16_t dst;  /* port */
   uint16_t len;  /* len of (header + data) in bytes */
   uint16_t checksum;
-} udp_hdr_t;
+} __packed udp_hdr_t;
 
 typedef struct {
   uint8_t li_vn_mode;   /* 2b Leap Indicator, 3b Version Number, 3b Association Mode */
@@ -117,7 +118,7 @@ typedef struct {
   uint64_t org_tstamp;  /* origin timestamp */
   uint64_t rec_tstamp;  /* receive timestamp */
   uint64_t xmt_tstamp;  /* transmit timestamp */
-} ntp_hdr_t;
+} __packed ntp_hdr_t;
 
 uint64_t dst_tstamp;  /* destination timestamp; not part of header */
 
@@ -128,7 +129,7 @@ void *field2;          /* extension field2 (variable length) */
 typedef struct {
   uint32_t key_id;
   uint8_t dgst[128];
-} ntp_ftr_t;
+} __packed ntp_ftr_t;
 
 struct global_vars_s {
   pcap_t *pcap_handle;
@@ -190,7 +191,7 @@ void process_payload(struct args_s *args, const uint8_t *data,
 /**
  * convert network IPv6 representation to host one; works in situ
  */
-void *ntohv6(uint32_t *addr) {
+uint32_t *ntohv6(uint32_t *addr) {
   //FIXME handle endianess for 62b values
   addr[0] = ntohl(*(addr + 0));
   addr[1] = ntohl(*(addr + 1));
@@ -200,24 +201,29 @@ void *ntohv6(uint32_t *addr) {
   return addr;
 }
 
-void print_flow_def(FILE *f, const void *addr, uint16_t port,
+int print_flow_def(char *s, const uint8_t *addr, uint16_t port,
 		    const bool is_ipv6) {
   char buf[INET6_ADDRSTRLEN +1] = {0};
   void *ip6 = NULL;
   uint32_t ip4;
+  uint32_t u[4];
 
-  if (is_ipv6)
-    ip6 = ntohv6((uint32_t *)addr);
-  else
-    ip4 = ntohl(*((uint32_t *)addr));
+  if (is_ipv6) {
+    memcpy(u, addr, sizeof(u));
+    ip6 = u;
+  }
+  else {
+    memcpy(u, addr, sizeof(u[0]));
+    ip4 = u[0];
+  }
 
-  fprintf(f, "%s[%d]",
-	  inet_ntop(
-		    (is_ipv6) ? AF_INET6 : AF_INET,
-		    (is_ipv6) ? ip6 : (void *)&ip4,
-		    buf,
-		    INET6_ADDRSTRLEN),
-	  ntohs(port));
+  return sprintf(s, "%s[%d]",
+		 inet_ntop(
+			   (is_ipv6) ? AF_INET6 : AF_INET,
+			   (is_ipv6) ? ip6 : (void *)&ip4,
+			   buf,
+			   INET6_ADDRSTRLEN),
+		 ntohs(port));
 }
 
 #define CHECK_PACKET_LEN						\
@@ -231,14 +237,15 @@ void handle_packet(uint8_t *_args, const struct pcap_pkthdr *header,
   uint8_t *tmp;
 
   /* pcap timestamp */
-  fprintf(stderr, "%u.%09u\n", header->ts.tv_sec, header->ts.tv_usec);
+  fprintf(args->o, "t=%lu.%09lu\t", header->ts.tv_sec, header->ts.tv_usec);
 
   /* jump over ethernet header */
   packet += sizeof(eth_hdr_t);
   CHECK_PACKET_LEN;
 
-  void *src = NULL;  /* in_addr or in6_addr */
-  void *dst = NULL;  /* in_addr or in6_addr */
+  uint8_t
+    *src = NULL,  /* in_addr or in6_addr */
+    *dst = NULL;  /* in_addr or in6_addr */
   bool ipv6_found = false;
 
   /* jump over IP header(s) */
@@ -256,8 +263,8 @@ void handle_packet(uint8_t *_args, const struct pcap_pkthdr *header,
     tmp = packet;
     packet += IPv4_hdrlen(((ipv4_hdr_t *)packet)->ver_hdrlen);
     CHECK_PACKET_LEN;
-    src = (void *)&((ipv4_hdr_t *)tmp)->src;
-    dst = (void *)&((ipv4_hdr_t *)tmp)->dst;
+    src = (uint8_t *)&((ipv4_hdr_t *)tmp)->src;
+    dst = (uint8_t *)&((ipv4_hdr_t *)tmp)->dst;
     break;
   case IP_VERSION_6:
     /* jump over all chained IPv6 headers */
@@ -271,8 +278,8 @@ void handle_packet(uint8_t *_args, const struct pcap_pkthdr *header,
     tmp = packet;
     packet += sizeof(ipv6_hdr_t);
     CHECK_PACKET_LEN;
-    src = (void *)&((ipv6_hdr_t *)tmp)->src;
-    dst = (void *)&((ipv6_hdr_t *)tmp)->dst;
+    src = (uint8_t *)&((ipv6_hdr_t *)tmp)->src;
+    dst = (uint8_t *)&((ipv6_hdr_t *)tmp)->dst;
     ipv6_found = true;
     break;
   default:
@@ -280,21 +287,24 @@ void handle_packet(uint8_t *_args, const struct pcap_pkthdr *header,
   }
 
   tmp = packet;
+  udp_hdr_t *udp_hdr = (udp_hdr_t*)tmp;
   packet += sizeof(udp_hdr_t);  /* jump over UDP header */
   CHECK_PACKET_LEN;
 
-  //FIXME add timestamps from header (written by pcap)
   /* construct nice message */
-  args->buf_end += sprintf(args->buf + args->buf_end, "src ");
-  //args->buf_end += print_flow_def(stdout, args->buf + args->buf_end, src,
-  //((udp_hdr_t *)tmp)->src, ipv6_found);
-  args->buf_end += sprintf(args->buf, " dst ");
-  //args->buf_end += print_flow_def(stdout, args->buf + args->buf_end, dst,
-  //((udp_hdr_t *)tmp)->dst, ipv6_found);
+  args->buf_end += sprintf(args->buf + args->buf_end, "src=");
+  args->buf_end += print_flow_def(args->buf + args->buf_end,
+				  src, udp_hdr->src, ipv6_found);
+  args->buf_end += sprintf(args->buf + args->buf_end, " dst=");
+  args->buf_end += print_flow_def(args->buf + args->buf_end,
+				  dst,
+				  udp_hdr->dst, ipv6_found);
   args->buf_end += sprintf(args->buf + args->buf_end, "\n");
 
   //process_payload(args, packet, header->caplen - (packet - _packet));
   args->buf_end = 0;
+
+  fprintf(args->o, args->buf);
 }
 
 void print_pcap_warning(FILE *f, int rc) {
