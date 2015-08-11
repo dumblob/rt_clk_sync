@@ -43,8 +43,7 @@
 #include <string.h>  // strerror()
 #include <stdbool.h>
 
-#define length(a) (sizeof(a)/sizeof((a)[0]))
-#define __packed __attribute__((packed))
+#include "clxync_obsv.h"
 
 #define RING_BUF_SIZE 8192  /* for 1 packet */
 #define READ_TIMEOUT 300  /* ms */
@@ -111,37 +110,12 @@ typedef struct {
   uint16_t checksum;
 } __packed udp_hdr_t;
 
-#define NTP_PACKET 							\
-  uint8_t li_vn_mode;   /* 2b Leap Indicator, 3b Version Number, 3b Association Mode */\
-  uint8_t stratum;\
-  uint8_t poll;         /* msg interval in log2 sec */\
-  uint8_t precision;    /* precision of the system clock in log2 sec */\
-  uint32_t root_delay;  /* total round-trip delay to the ref clock */\
-  uint32_t root_disp;   /* root dispersion (total disp. to the ref clk) */\
-  uint32_t ref_id;      /* reference ID (usually ASCII printable) */\
-  uint64_t ref_tstamp;  /* reference timestamp (time when sys clk was last set/corrected) */\
-  uint64_t org_tstamp;  /* origin timestamp */\
-  uint64_t rec_tstamp;  /* receive timestamp */\
-  uint64_t xmt_tstamp;  /* transmit timestamp */
-
-typedef struct {
-  NTP_PACKET
-} __packed ntp_pkt_pkd_t;
-
-typedef struct {
-  NTP_PACKET
-} /* not packed */ ntp_pkt_t;
-
-uint64_t dst_tstamp;  /* destination timestamp; not part of header */
-
-typedef 
-void *field1;          /* extension field1 (variable length) */
-void *field2;          /* extension field2 (variable length) */
-
+/* ??
 typedef struct {
   uint32_t key_id;
   uint8_t dgst[128];
 } __packed ntp_ftr_t;
+*/
 
 struct global_vars_s {
   pcap_t *pcap_handle;
@@ -167,12 +141,6 @@ char *ipaddr2str(char *s, const uint8_t *addr, const bool is_ipv6) {
     s = buf;
   inet_ntop(is_ipv6 ? AF_INET6 : AF_INET, (void*)addr, s, INET6_ADDRSTRLEN);
   return s;
-}
-
-int print_flow_def(char *s, const uint8_t *addr, uint16_t port,
-		   const bool is_ipv6) {
-  return sprintf(s, "%s[%d]", ipaddr2str(NULL, addr, is_ipv6),
-		 ntohs(port));
 }
 
 int ntp2txt(char *s, ntp_pkt_t *ntp) {
@@ -205,8 +173,8 @@ void output_ntp_packet(FILE *out,
   fprintf(out,
 	  "t=%lu.%09lu\tsrc=%s[%d] dst=%s[%d]\n%s",
 	  tstamp->tv_sec, tstamp->tv_usec,
-	  ipaddr2str(a1, src_ip, ipv6), htons(src_port),
-	  ipaddr2str(a2, dst_ip, ipv6), htons(dst_port),
+	  ipaddr2str(a1, src_ip, ipv6), src_port,
+	  ipaddr2str(a2, dst_ip, ipv6), dst_port,
 	  s);
 }
 
@@ -313,9 +281,14 @@ void handle_packet(uint8_t *_args, const struct pcap_pkthdr *header,
     return;
   ntp_pkt_t ntp;
   parse_ntp_packet(&ntp, packet);
+  uint16_t src_port = htons(udp_hdr->src), dst_port = htons(udp_hdr->dst);
   output_ntp_packet(args->o,
-		    ipv6_found, src, udp_hdr->src, dst, udp_hdr->dst,
+		    ipv6_found, src, src_port, dst, dst_port,
 		    &header->ts, &ntp);
+#ifdef SQL
+  sql_output_ntp_packet(ipv6_found, src, src_port, dst, dst_port,
+			&header->ts, &ntp);
+#endif
 }
 
 void print_pcap_warning(FILE *f, int rc) {
@@ -466,7 +439,12 @@ int main(int argc, char *argv[]) {
   while ((opt = getopt(argc, argv, "+hd:o:t:")) != -1) {
     switch (opt) {
     case 'h':
-      printf("USAGE: %s [-h] [-d <eth_device>] [-o <output_file>]\n"
+      printf(
+#ifdef SQL
+      "USAGE: %s [-h] [-d <eth_device>] [-o <output_file>] [sql_db_file]\n"
+#else
+      "USAGE: %s [-h] [-d <eth_device>] [-o <output_file>]\n"
+#endif
 	     "  -d ethernet device to watch on\n"
 	     "    if none given, watch on all available devices\n"
 	     "  -t timestamp_type\n"
@@ -509,10 +487,18 @@ int main(int argc, char *argv[]) {
   }
 
   /* optind points to next argument (after the current one) in argv */
+#ifdef SQL
   if (optind != argc) {
-    fprintf(stderr, "Unknown argument \"%s\".\n", argv[optind]);
-    return EXIT_FAILURE;
+    sql_init(argv[optind]);
   }
+  else {
+    sql_init(DEFAULT_SQL_DB);
+  }
+  sql_log("init");
+#else
+  fprintf(stderr, "Unknown argument \"%s\".\n", argv[optind]);
+  return EXIT_FAILURE;
+#endif
 
   if (args.d == NULL) {
     fprintf(stderr,
@@ -526,6 +512,8 @@ int main(int argc, char *argv[]) {
   fprintf(stderr, "Press Ctrl+C for exit.\n");
   int ret = start_capture(&args);
   fclose(args.o);
-
+#ifdef SQL
+  sql_close();
+#endif
   return ret;
 }
