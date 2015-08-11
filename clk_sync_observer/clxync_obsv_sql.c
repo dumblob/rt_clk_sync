@@ -122,6 +122,8 @@ void sql_output_ntp_packet(bool ipv6,
   ntp_info_t nfo;
   int pair_idx;
   int (*find_packet)(ntp_info_t *ntp_rx);
+  struct timespec ts;
+  clock_gettime(LOG_CLK_ID, &ts);
   /* determine, whether we have got tx or rx packet;
      simply assume, that client's local port will never be equal to 123;
      in case of error, file it under rx
@@ -159,6 +161,9 @@ void sql_output_ntp_packet(bool ipv6,
   sql_rc(sqlite3_bind_int  (ins_exe, ++i, src_port));
   sql_rc(sqlite3_bind_text (ins_exe, ++i, nfo.dst_addr_s, -1, SQLITE_STATIC));
   sql_rc(sqlite3_bind_int  (ins_exe, ++i, dst_port));
+  /* very coarse timestamp for SQL index/sort only */
+  sql_rc(sqlite3_bind_int64(ins_exe, ++i, ts.tv_sec));
+  sql_rc(sqlite3_bind_int64(ins_exe, ++i, ts.tv_nsec));
   /* our (pcap) timestamp */
   sql_rc(sqlite3_bind_int64(ins_exe, ++i, tstamp->tv_sec));
   sql_rc(sqlite3_bind_int64(ins_exe, ++i, tstamp->tv_usec /*act.nsec*/));
@@ -172,9 +177,9 @@ void sql_output_ntp_packet(bool ipv6,
   sql_rc(sqlite3_bind_int  (ins_exe, ++i, mode));
   sql_rc(sqlite3_bind_int  (ins_exe, ++i, ntp->poll));
   sql_rc(sqlite3_bind_int  (ins_exe, ++i, ntp->precision));
-  sql_rc(sqlite3_bind_int64(ins_exe, ++i, ntp->root_delay));
-  sql_rc(sqlite3_bind_int64(ins_exe, ++i, ntp->root_disp));
-  sql_rc(sqlite3_bind_int64(ins_exe, ++i, ntp->ref_id));
+  sql_rc(sqlite3_bind_int  (ins_exe, ++i, ntp->root_delay));
+  sql_rc(sqlite3_bind_int  (ins_exe, ++i, ntp->root_disp));
+  sql_rc(sqlite3_bind_int  (ins_exe, ++i, ntp->ref_id));
   sql_rc(sqlite3_bind_int  (ins_exe, ++i, hi32(ntp->ref_tstamp)));
   sql_rc(sqlite3_bind_int  (ins_exe, ++i, lo32(ntp->ref_tstamp)));
   sql_rc(sqlite3_bind_int  (ins_exe, ++i, hi32(ntp->org_tstamp)));
@@ -202,10 +207,10 @@ void sql_init(char *db_fname) {
     "INSERT INTO log VALUES (?,?,'clxync_obsv',?)",
     ins_ntp_tx_cmd[] =
     "INSERT INTO ntp_tx "
-    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     ins_ntp_rx_cmd[] =
     "INSERT INTO ntp_rx "
-    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
   sql_rc(sqlite3_open(db_fname, &db));
   sql_rc(sqlite3_prepare(db, ins_log_cmd, -1, &ins_log_exe, NULL));
   sql_rc(sqlite3_prepare(db, ins_ntp_tx_cmd, -1, &ins_ntp_tx_exe, NULL));
