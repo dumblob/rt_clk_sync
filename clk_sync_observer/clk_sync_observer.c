@@ -1,6 +1,11 @@
 /**
  * capture NTP packets and extract contained timestamps
- * Author: Jan Pacner xpacne00@stud.fit.vutbr.cz
+ *
+ * Authors:
+ *   first code by Jan Pacner <xpacne00@stud.fit.vutbr.cz>
+ *   idea by Marek Peca <hefaistos@gmail.com>
+ *   supported by the wisdom of Pavel Pisa <pisa@cmp.felk.cvut.cz>
+ *
  * Date: 2013-05-23 14:48:07 CEST
  * License:
  *   "THE BEER-WARE LICENSE" (Revision 42):
@@ -106,19 +111,26 @@ typedef struct {
   uint16_t checksum;
 } __packed udp_hdr_t;
 
-typedef struct {
-  uint8_t li_vn_mode;   /* 2b Leap Indicator, 3b Version Number, 3b Association Mode */
-  uint8_t stratum;
-  uint8_t poll;         /* msg interval in log2 sec */
-  uint8_t precision;    /* precision of the system clock in log2 sec */
-  uint32_t root_delay;  /* total round-trip delay to the ref clock */
-  uint32_t root_disp;   /* root dispersion (total disp. to the ref clk) */
-  uint32_t ref_id;      /* reference ID (usually ASCII printable) */
-  uint64_t ref_tstamp;  /* reference timestamp (time when sys clk was last set/corrected) */
-  uint64_t org_tstamp;  /* origin timestamp */
-  uint64_t rec_tstamp;  /* receive timestamp */
+#define NTP_PACKET 							\
+  uint8_t li_vn_mode;   /* 2b Leap Indicator, 3b Version Number, 3b Association Mode */\
+  uint8_t stratum;\
+  uint8_t poll;         /* msg interval in log2 sec */\
+  uint8_t precision;    /* precision of the system clock in log2 sec */\
+  uint32_t root_delay;  /* total round-trip delay to the ref clock */\
+  uint32_t root_disp;   /* root dispersion (total disp. to the ref clk) */\
+  uint32_t ref_id;      /* reference ID (usually ASCII printable) */\
+  uint64_t ref_tstamp;  /* reference timestamp (time when sys clk was last set/corrected) */\
+  uint64_t org_tstamp;  /* origin timestamp */\
+  uint64_t rec_tstamp;  /* receive timestamp */\
   uint64_t xmt_tstamp;  /* transmit timestamp */
-} __packed ntp_hdr_t;
+
+typedef struct {
+  NTP_PACKET
+} __packed ntp_pkt_pkd_t;
+
+typedef struct {
+  NTP_PACKET
+} /* not packed */ ntp_pkt_t;
 
 uint64_t dst_tstamp;  /* destination timestamp; not part of header */
 
@@ -149,81 +161,87 @@ struct args_s {
   .buf_end = 0,
 };
 
-/* extract NTP timestamps */
-#if 0
-void process_payload(struct args_s *args, const uint8_t *data,
-		     const uint32_t len) {
-  data = data;
-  fprintf(args->o, "  _______%d\n", len);//FIXME
-  fflush(args->o);
-
-  if (stratum == 0) return;
-
-  switch (association_mode) {
-    // no association
-  case 0:
-    if (newps)  //FIXME association modes
-    else if (fxmit)
-    else if (many)
-    else if (newbc)
-    else
-      return;
-    // symm. active
-  case 1:
-    t
-      // symm. passive
-  case 2:
-    // client
-  case 3:
-    // server
-  case 4:
-    // broadcast
-  case 5:
-    // bcast client
-  case 6:
-    // undefined/unknown/invalid_packet
-  default:
-    return;
-  }
-}
-#endif
-
-/**
- * convert network IPv6 representation to host one; works in situ
- */
-uint32_t *ntohv6(uint32_t *addr) {
-  //FIXME handle endianess for 62b values
-  addr[0] = ntohl(*(addr + 0));
-  addr[1] = ntohl(*(addr + 1));
-  addr[2] = ntohl(*(addr + 2));
-  addr[3] = ntohl(*(addr + 3));
-
-  return addr;
+char *ipaddr2str(char *s, const uint8_t *addr, const bool is_ipv6) {
+  static char buf[INET6_ADDRSTRLEN+1];
+  if (s == NULL)
+    s = buf;
+  inet_ntop(is_ipv6 ? AF_INET6 : AF_INET, (void*)addr, s, INET6_ADDRSTRLEN);
+  return s;
 }
 
 int print_flow_def(char *s, const uint8_t *addr, uint16_t port,
-		    const bool is_ipv6) {
-  char buf[INET6_ADDRSTRLEN +1] = {0};
-  void *ip6 = NULL;
-  uint32_t ip4;
-  uint32_t u[4];
-
-  if (is_ipv6) {
-    memcpy(u, addr, sizeof(u));
-    ip6 = u;
-  }
-  else {
-    memcpy(u, addr, sizeof(u[0]));
-    ip4 = u[0];
-  }
-
-  return sprintf(s, "%s[%d]",
-		 inet_ntop(
-			   (is_ipv6) ? AF_INET6 : AF_INET,
-			   (is_ipv6) ? ip6 : (void *)&ip4,
-			   buf,
-			   INET6_ADDRSTRLEN),
+		   const bool is_ipv6) {
+  return sprintf(s, "%s[%d]", ipaddr2str(NULL, addr, is_ipv6),
 		 ntohs(port));
+}
+
+int ntp2txt(char *s, ntp_pkt_t *ntp) {
+  uint8_t li, vn, mode;
+  li = ntp->li_vn_mode >> 6;
+  vn = (ntp->li_vn_mode >> 3) & 0x7;
+  mode = (ntp->li_vn_mode >> 0) & 0x7;
+
+  return
+    sprintf(s,
+	    " li=%u vn=%u mode=%u stratum=%u poll=%u precision=%u\n"
+	    " root_delay=%u root_disp=%u ref_id=0x%08x\n"
+	    " ref_tstamp=%016llX org_tstamp=%016llX\n"
+	    " rec_tstamp=%016llX xmt_tstamp=%016llX\n",
+	    li, vn, mode,
+	    ntp->stratum, ntp->poll, ntp->precision,
+	    ntp->root_delay, ntp->root_disp, ntp->ref_id,
+	    ntp->ref_tstamp, ntp->org_tstamp, ntp->rec_tstamp, ntp->xmt_tstamp);
+}
+
+void output_ntp_packet(FILE *out,
+		       bool ipv6,
+		       const uint8_t *src_ip, uint16_t src_port,
+		       const uint8_t *dst_ip, uint16_t dst_port,
+		       const struct timeval *tstamp, /* actually is in nsec */
+		       ntp_pkt_t *ntp) {
+  static char a1[INET6_ADDRSTRLEN+1], a2[INET6_ADDRSTRLEN+1];
+  static char s[1024];
+  ntp2txt(s, ntp);
+  fprintf(out,
+	  "t=%lu.%09lu\tsrc=%s[%d] dst=%s[%d]\n%s",
+	  tstamp->tv_sec, tstamp->tv_usec,
+	  ipaddr2str(a1, src_ip, ipv6), htons(src_port),
+	  ipaddr2str(a2, dst_ip, ipv6), htons(dst_port),
+	  s);
+}
+
+static inline uint8_t get_u8(uint8_t **p) {
+  uint8_t u = **p;
+  ++*p;
+  return u;
+}
+
+static inline uint32_t get_u32be(uint8_t **p) {
+  uint32_t u = get_u8(p);
+  u <<= 8;  u |= get_u8(p);
+  u <<= 8;  u |= get_u8(p);
+  u <<= 8;  u |= get_u8(p);
+  return u;
+}
+
+static inline uint64_t get_u64be(uint8_t **p) {
+  uint64_t u = get_u32be(p);
+  u <<= 32;  u |= get_u32be(p); 
+  return u;
+}
+
+void parse_ntp_packet(ntp_pkt_t *ntp, uint8_t *pkt) {
+  ntp->li_vn_mode = get_u8(&pkt);
+  ntp->stratum    = get_u8(&pkt);
+  ntp->poll       = get_u8(&pkt);
+  ntp->precision  = get_u8(&pkt);
+  ntp->root_delay = get_u32be(&pkt);
+  ntp->root_disp  = get_u32be(&pkt);
+  ntp->ref_id     = get_u32be(&pkt);
+  ntp->ref_tstamp = get_u64be(&pkt);
+  ntp->org_tstamp = get_u64be(&pkt);
+  ntp->rec_tstamp = get_u64be(&pkt);
+  ntp->xmt_tstamp = get_u64be(&pkt);
 }
 
 #define CHECK_PACKET_LEN						\
@@ -236,8 +254,7 @@ void handle_packet(uint8_t *_args, const struct pcap_pkthdr *header,
   uint8_t *packet = (uint8_t *)_packet;
   uint8_t *tmp;
 
-  /* pcap timestamp */
-  fprintf(args->o, "t=%lu.%09lu\t", header->ts.tv_sec, header->ts.tv_usec);
+  /* pcap timestamp: header->ts */
 
   /* jump over ethernet header */
   packet += sizeof(eth_hdr_t);
@@ -291,20 +308,14 @@ void handle_packet(uint8_t *_args, const struct pcap_pkthdr *header,
   packet += sizeof(udp_hdr_t);  /* jump over UDP header */
   CHECK_PACKET_LEN;
 
-  /* construct nice message */
-  args->buf_end += sprintf(args->buf + args->buf_end, "src=");
-  args->buf_end += print_flow_def(args->buf + args->buf_end,
-				  src, udp_hdr->src, ipv6_found);
-  args->buf_end += sprintf(args->buf + args->buf_end, " dst=");
-  args->buf_end += print_flow_def(args->buf + args->buf_end,
-				  dst,
-				  udp_hdr->dst, ipv6_found);
-  args->buf_end += sprintf(args->buf + args->buf_end, "\n");
-
-  //process_payload(args, packet, header->caplen - (packet - _packet));
-  args->buf_end = 0;
-
-  fprintf(args->o, args->buf);
+  if (header->caplen - (packet - _packet) != sizeof(ntp_pkt_pkd_t))
+    /*FIXME: add broken/unknown packets error reporting */
+    return;
+  ntp_pkt_t ntp;
+  parse_ntp_packet(&ntp, packet);
+  output_ntp_packet(args->o,
+		    ipv6_found, src, udp_hdr->src, dst, udp_hdr->dst,
+		    &header->ts, &ntp);
 }
 
 void print_pcap_warning(FILE *f, int rc) {
@@ -428,6 +439,7 @@ int start_capture(struct args_s *args) {
 /* sigaction handler */
 void my_sa_handler(int x) {
   x = x;
+  fprintf(stderr, "finishing packet capture\n");
   pcap_breakloop(global_vars.pcap_handle);
 }
 
@@ -503,13 +515,15 @@ int main(int argc, char *argv[]) {
   }
 
   if (args.d == NULL) {
-    printf("WARN: On some platforms (e.g. Linux) the pcap device \"any\" produces\n"
-           "  malformed packets. See -h for choosing a particular device.\n");
+    fprintf(stderr,
+	    "WARN: On some platforms (e.g. Linux) the pcap device \"any\" "
+	    "produces\nmalformed packets. See -h for choosing a particular "
+	    "device.\n");
     args.d = "any";
   }
   if (args.o == NULL) args.o = stdout;
 
-  printf("Press Ctrl+C for exit.\n");
+  fprintf(stderr, "Press Ctrl+C for exit.\n");
   int ret = start_capture(&args);
   fclose(args.o);
 
