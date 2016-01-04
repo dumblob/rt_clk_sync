@@ -105,6 +105,12 @@ Test & prototype the idea in two different scenarios:
   * later, add multiple-servers fusion
   * (much later: adaptive filtering...)
 
+Resources
+---------
+
+* https://github.com/jeremyfix/easykf (C++ Kalman filtering (Extended Kalman Filter, Unscented Kalman Filter)
+* https://github.com/TKJElectronics/KalmanFilter (Kalman filter used to calculate the angle, rate and bias from from the input of an accelerometer/magnetometer and a gyroscope)
+
 People & Credits
 ----------------
 
